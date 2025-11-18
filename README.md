@@ -6,15 +6,7 @@ Extract clean product regions from retail ad images to improve Cortex Search bra
 **Technology:** SAM vit-h on Snowflake SPCS GPU  
 
 ## Demo Video
-
-<!-- TODO: Replace with GitHub user-attachments URL after drag-and-drop upload -->
-<!-- Drag and drop assets/demo.mov into GitHub's README editor to generate the embedded player URL -->
-
-https://github.com/sfc-gh-aperezgonzalez/spcs-sam-product-extraction-poc/assets/demo.mov
-
-> Watch the SAM product extraction in action - extracting clean product regions from retail ads in ~5 seconds per image on Snowflake SPCS GPU.
->
-> **Note:** For embedded video player, edit this README on GitHub and drag-and-drop the video file to generate a `user-attachments` URL.
+https://github.com/user-attachments/assets/058ab533-6715-49cd-81f9-1b5ec722492f
 
 ---
 

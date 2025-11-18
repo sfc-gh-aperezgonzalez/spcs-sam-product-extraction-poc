@@ -1,0 +1,79 @@
+# Model weights (large files)
+model_weights/
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+
+# Docker
+*.log
+.docker/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Snowflake
+.snowflake/
+snow.toml
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Large data files
+*.zip
+*.tar.gz
+*.tar
+data/
+outputs/
+
+# Local test images (keep sample images in repo)
+test_images/
+local_test/
+
+# Output images
+output/
+
+.cursor/
+specs/
+model_weights/

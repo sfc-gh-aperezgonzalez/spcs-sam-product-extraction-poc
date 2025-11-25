@@ -107,20 +107,27 @@ class SAMInference:
         self.last_crop_metadata = []
         image_area = np_image.shape[0] * np_image.shape[1]
         
+        logger.info(f"Starting crop creation loop for {len(filtered_masks)} masks...")
+        
         for idx, mask in enumerate(filtered_masks):
+            logger.info(f"Processing mask {idx+1}/{len(filtered_masks)}")
             try:
                 # Create bounding box crop (RGB, no transparency)
+                logger.info(f"  Creating crop {idx}...")
                 crop_image = create_transparent_crop(
                     image=np_image,
                     mask=mask
                 )
+                logger.info(f"  Crop {idx} created, size: {crop_image.size}")
                 
                 # Generate output filename
                 filename = f"{output_prefix}product_{idx:03d}.png"
                 output_url = output_stage + filename
+                logger.info(f"  Uploading {idx} to: {output_url}")
                 
                 # Upload to stage
                 upload_crop_to_stage(crop_image, output_url)
+                logger.info(f"  Upload {idx} complete")
                 crop_urls.append(output_url)
                 
                 # Store metadata for downstream Cortex filtering

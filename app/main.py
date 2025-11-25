@@ -84,16 +84,20 @@ async def run_inference(request: Request):
     try:
         # Get inference engine
         engine = get_inference_engine()
+        logger.info("Engine loaded successfully")
         
         # Get output stage URL from environment
         output_stage = os.getenv("AD_OUTPUT_STAGE_URL", "@AD_OUTPUT_STAGE/")
+        logger.info(f"Output stage: {output_stage}")
         
         # Run inference and get crops
+        logger.info("Starting process_image...")
         crop_urls = engine.process_image(
             input_url=input_url,
             output_stage=output_stage,
             output_prefix=output_prefix
         )
+        logger.info(f"process_image completed")
         
         logger.info(f"Generated {len(crop_urls)} product crops")
         

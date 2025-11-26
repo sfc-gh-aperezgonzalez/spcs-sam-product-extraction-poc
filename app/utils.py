@@ -6,9 +6,11 @@ Uses mounted Snowflake stage volumes for file access.
 import os
 import logging
 from typing import List, Dict, Any
+from io import BytesIO
 
 import numpy as np
 from PIL import Image
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +51,43 @@ def read_image_from_stage(stage_url: str) -> Image.Image:
     return image
 
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    retry=retry_if_exception_type((OSError, IOError)),
+    reraise=True
+)
+def _write_file_with_retry(file_path: str, data: bytes) -> None:
+    """
+    Write file data with retry logic for transient failures.
+    Uses atomic write pattern: write to temp, then rename.
+    
+    Args:
+        file_path: Destination file path (must be flat, no subdirectories)
+        data: File data as bytes
+    """
+    # Atomic write: write to temp file, then rename
+    # NO mkdir() calls - flat structure only
+    temp_path = f"{file_path}.tmp"
+    try:
+        with open(temp_path, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        
+        # Atomic rename
+        os.replace(temp_path, file_path)
+        logger.debug(f"Successfully wrote {len(data)} bytes to {file_path}")
+    except Exception as e:
+        # Clean up temp file on failure
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except:
+                pass
+        raise e
+
+
 def upload_crop_to_stage(image: Image.Image, stage_url: str) -> None:
     """
     Upload a cropped image to a Snowflake stage.
@@ -56,7 +95,7 @@ def upload_crop_to_stage(image: Image.Image, stage_url: str) -> None:
     
     Args:
         image: PIL Image to upload
-        stage_url: Destination stage path or local path
+        stage_url: Destination stage path (flat structure)
     """
     logger.debug(f"Uploading crop to: {stage_url}")
     
@@ -70,19 +109,26 @@ def upload_crop_to_stage(image: Image.Image, stage_url: str) -> None:
         else:
             file_path = "/output/"
         
-        # Ensure directory exists
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        
         logger.debug(f"Using mounted path: {file_path}")
         
-        with open(file_path, "wb") as f:
-            image.save(f, format="PNG")
+        # Write image to BytesIO buffer first (in-memory operation)
+        # This decouples PIL operations from filesystem I/O
+        buffer = BytesIO()
+        image.save(buffer, format="PNG", optimize=False)  # optimize=False for speed
+        image_data = buffer.getvalue()
+        buffer.close()
+        
+        # Write to file with retry logic (no artificial delays needed)
+        _write_file_with_retry(file_path, image_data)
+        
     else:
         # Try as direct file path
-        os.makedirs(os.path.dirname(stage_url), exist_ok=True)
+        buffer = BytesIO()
+        image.save(buffer, format="PNG", optimize=False)
+        image_data = buffer.getvalue()
+        buffer.close()
         
-        with open(stage_url, "wb") as f:
-            image.save(f, format="PNG")
+        _write_file_with_retry(stage_url, image_data)
 
 
 def filter_masks_minimal(

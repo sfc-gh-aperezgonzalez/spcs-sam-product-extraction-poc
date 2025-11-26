@@ -55,10 +55,14 @@ async def run_inference(request: Request):
     Supports both direct calls and Snowflake service function batch format.
     
     Args:
-        request: Either {input_url, output_prefix} OR Snowflake batch {data: [[row, arg1, arg2]]}
+        request: Either {input_url, output_stage} OR Snowflake batch {data: [[row, arg1, arg2]]}
     
     Returns:
-        NDJSON with one crop per line: {"crop_url": "...", "crop_index": 0, ...}
+        JSON with crop URLs and metadata: {"crops": [...], "num_products": N, ...}
+    
+    Note:
+        Uses FLAT directory structure (no subdirectories) for improved performance.
+        Files: template_X_YY_runid_product_NNN.png (all at stage root level)
     """
     # Parse JSON body
     body = await request.json()
@@ -66,36 +70,35 @@ async def run_inference(request: Request):
     # Parse request - handle both formats
     if "data" in body:
         # Snowflake service function batch format: {"data": [[row_num, arg1, arg2, ...]]}
-        # For single-row: [[0, image_path, output_prefix]]
+        # For single-row: [[0, image_path, output_stage]]
         data = body["data"]
         if len(data) > 0 and len(data[0]) >= 3:
             input_url = data[0][1]  # Second element (after row number)
-            output_prefix = data[0][2]  # Third element
+            output_stage = data[0][2]  # Third element (stage URL)
             logger.info(f"Service function batch request: row={data[0][0]}")
         else:
             raise HTTPException(status_code=400, detail="Invalid batch data format")
     else:
         # Direct API call format
         input_url = body.get("input_url")
-        output_prefix = body.get("output_prefix", "")
+        output_stage = body.get("output_stage", os.getenv("AD_OUTPUT_STAGE_URL", "@AD_OUTPUT_STAGE"))
     
-    logger.info(f"Inference request: input={input_url}, prefix={output_prefix}")
+    # Ensure output_stage has proper format (with @ prefix)
+    if not output_stage.startswith("@"):
+        output_stage = f"@{output_stage}"
+    
+    logger.info(f"Inference request: input={input_url}, output_stage={output_stage}")
     
     try:
         # Get inference engine
         engine = get_inference_engine()
         logger.info("Engine loaded successfully")
         
-        # Get output stage URL from environment
-        output_stage = os.getenv("AD_OUTPUT_STAGE_URL", "@AD_OUTPUT_STAGE/")
-        logger.info(f"Output stage: {output_stage}")
-        
         # Run inference and get crops
         logger.info("Starting process_image...")
         crop_urls = engine.process_image(
             input_url=input_url,
-            output_stage=output_stage,
-            output_prefix=output_prefix
+            output_stage=output_stage
         )
         logger.info(f"process_image completed")
         
@@ -115,7 +118,7 @@ async def run_inference(request: Request):
             "num_products": len(crop_urls),
             "product_likely": product_likely,
             "input_image": input_url,
-            "output_prefix": output_prefix,
+            "output_stage": output_stage,
             "metadata": crop_metadata  # For Cortex-based product filtering
         })
         

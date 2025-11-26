@@ -76,4 +76,3 @@ SELECT 'Service deployment initiated. Use SYSTEM$GET_SERVICE_STATUS to check rea
 -- - Check status: SELECT SYSTEM$GET_SERVICE_STATUS('SAM_INFERENCE_SERVICE');
 -- - List running services: SHOW SERVICES IN SCHEMA PRODUCT_EXTRACTION;
 -- ============================================================================
-

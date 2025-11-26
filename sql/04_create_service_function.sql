@@ -20,9 +20,11 @@ SELECT '✓ Service role granted' AS progress;
 -- This is NOT Python code - it's a Snowflake SQL definition that binds to the FastAPI endpoint
 -- The actual processing code is in app/main.py, app/inference.py, app/utils.py
 -- Returns JSON string with all crop URLs and metadata
+--
+-- Note: Creates one subdirectory per image: template_X_YY_runid/
 CREATE OR REPLACE FUNCTION SHALION_HF_DEMO.PRODUCT_EXTRACTION.EXTRACT_PRODUCTS(
     IMAGE_PATH VARCHAR,
-    OUTPUT_PREFIX VARCHAR
+    OUTPUT_STAGE VARCHAR
 )
 RETURNS VARCHAR
 SERVICE = SHALION_HF_DEMO.PRODUCT_EXTRACTION.SAM_INFERENCE_SERVICE
@@ -34,8 +36,8 @@ SELECT '✓ Function EXTRACT_PRODUCTS created' AS progress;
 
 -- Step 3: Test the function with sample image
 -- SELECT SHALION_HF_DEMO.PRODUCT_EXTRACTION.EXTRACT_PRODUCTS(
---     '@SHALION_HF_DEMO.PRODUCT_EXTRACTION.AD_INPUT_STAGE/demo/1.png',
---     'test/'
+--     '@SHALION_HF_DEMO.PRODUCT_EXTRACTION.AD_INPUT_STAGE/ads/template_1_01.jpeg',
+--     '@SHALION_HF_DEMO.PRODUCT_EXTRACTION.AD_OUTPUT_STAGE'
 -- );
 
 SELECT 'Service function ready!' AS status;

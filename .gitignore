@@ -77,3 +77,6 @@ output/
 .cursor/
 specs/
 model_weights/
+
+TROUBLESHOOTING.md
+tests/

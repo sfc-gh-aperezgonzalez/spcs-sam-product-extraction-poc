@@ -4,6 +4,7 @@ SAM inference engine for automatic product segmentation.
 
 import os
 import uuid
+import gc
 import logging
 from typing import List
 
@@ -59,33 +60,42 @@ class SAMInference:
     def process_image(
         self,
         input_url: str,
-        output_stage: str,
-        output_prefix: str = ""
+        output_stage: str
     ) -> List[str]:
         """
         Process an ad image and extract product crops.
         
         Args:
-            input_url: Stage URL to input image (e.g., '@AD_INPUT_STAGE/demo/ad.jpg')
-            output_stage: Base stage URL for outputs
-            output_prefix: Prefix for output files (e.g., 'run_001/')
+            input_url: Stage URL to input image (e.g., '@AD_INPUT_STAGE/ads/template_1_01.jpg')
+            output_stage: Output stage URL (e.g., '@AD_OUTPUT_STAGE')
         
         Returns:
             List of output stage URLs for cropped products
+        
+        Note:
+            Uses FLAT directory structure (NO subdirectories).
+            FUSE mounts in SPCS hang with mkdir() operations during intensive file writing.
+            Files: template_X_YY_runid_product_NNN.png (all at root level)
         """
-        # Generate unique run ID if no prefix provided
-        if not output_prefix:
-            output_prefix = f"run_{uuid.uuid4().hex[:8]}/"
-        
-        # Ensure prefix ends with /
-        if not output_prefix.endswith("/"):
-            output_prefix += "/"
-        
         logger.info(f"Processing image: {input_url}")
+        
+        # Extract template name from input path
+        # e.g., '@AD_INPUT_STAGE/ads/template_1_01.jpg' -> 'template_1_01'
+        input_filename = os.path.basename(input_url)
+        template_name = os.path.splitext(input_filename)[0]
+        
+        # Generate unique run ID
+        run_id = uuid.uuid4().hex[:8]
+        
+        # FLAT structure: template_X_YY_runid_product_NNN.png (NO subdirectories)
+        output_prefix = f"{template_name}_{run_id}_"
+        
+        logger.info(f"Output prefix: {output_prefix}")
         
         # Read image from Snowflake stage
         image = read_image_from_stage(input_url)
         np_image = np.array(image)
+        image.close()  # Close PIL Image to free memory
         
         logger.info(f"Image shape: {np_image.shape}")
         
@@ -101,6 +111,9 @@ class SAMInference:
             image_shape=np_image.shape
         )
         logger.info(f"Returning {len(filtered_masks)} product candidates for Cortex filtering")
+        
+        # Clean up large mask list (each mask has numpy arrays)
+        del masks
         
         # Create crops and upload to stage
         crop_urls = []
@@ -120,14 +133,16 @@ class SAMInference:
                 )
                 logger.info(f"  Crop {idx} created, size: {crop_image.size}")
                 
-                # Generate output filename
+                # Generate flat output filename (no subdirectories)
+                # Structure: @STAGE/template_X_YY_runid_product_NNN.png
                 filename = f"{output_prefix}product_{idx:03d}.png"
-                output_url = output_stage + filename
+                output_url = output_stage + "/" + filename if not output_stage.endswith("/") else output_stage + filename
                 logger.info(f"  Uploading {idx} to: {output_url}")
                 
-                # Upload to stage
+                # Upload to stage (flat structure, no subdirectories)
                 upload_crop_to_stage(crop_image, output_url)
                 logger.info(f"  Upload {idx} complete")
+                crop_image.close()  # Close PIL Image to free memory
                 crop_urls.append(output_url)
                 
                 # Store metadata for downstream Cortex filtering
@@ -146,6 +161,23 @@ class SAMInference:
                 continue
         
         logger.info(f"Successfully created {len(crop_urls)} product crops")
+        
+        # Clean up large objects to free memory
+        del np_image
+        del filtered_masks
+        
+        # Clear GPU memory after processing each image
+        if self.device == "cuda":
+            torch.cuda.empty_cache()
+            logger.info("Cleared GPU cache")
+        
+        # Force garbage collection to free memory immediately
+        gc.collect()
+        
+        # NOTE: Removed artificial delays - not needed with flat directory structure
+        # Retry logic in upload_crop_to_stage handles transient failures
+        logger.info("Memory cleanup complete")
+        
         return crop_urls
     
     def get_crop_metadata(self):

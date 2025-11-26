@@ -23,10 +23,10 @@ RUN apt-get update && \
 # Upgrade pip
 RUN python3 -m pip install --no-cache-dir --upgrade pip
 
-# Install PyTorch with CUDA 12.1 support
+# Install PyTorch with CUDA 12.1 support (AMD64 compatible versions)
 RUN pip install --no-cache-dir \
-    torch==2.1.0 \
-    torchvision==0.16.0 \
+    torch==2.1.0+cu121 \
+    torchvision==0.16.0+cu121 \
     --index-url https://download.pytorch.org/whl/cu121
 
 # Install Segment Anything Model (SAM)
@@ -53,4 +53,3 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 
 # Run FastAPI with uvicorn
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]
-

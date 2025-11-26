@@ -25,9 +25,10 @@ https://github.com/user-attachments/assets/058ab533-6715-49cd-81f9-1b5ec722492f
 
 ```sql
 -- Extract product regions from an ad image
+-- Outputs flat structure: template_X_YY_runid_product_NNN.png
 SELECT SHALION_HF_DEMO.PRODUCT_EXTRACTION.EXTRACT_PRODUCTS(
-    '@AD_INPUT_STAGE/my_ad.jpg',
-    'output/'
+    '@AD_INPUT_STAGE/ads/my_ad.jpg',
+    '@AD_OUTPUT_STAGE'
 );
 ```
 
@@ -35,12 +36,13 @@ SELECT SHALION_HF_DEMO.PRODUCT_EXTRACTION.EXTRACT_PRODUCTS(
 ```json
 {
   "crops": [
-    "@AD_OUTPUT_STAGE/output/product_000.png",
-    "@AD_OUTPUT_STAGE/output/product_001.png",
-    "@AD_OUTPUT_STAGE/output/product_002.png"
+    "@AD_OUTPUT_STAGE/my_ad_a1b2c3d4_product_000.png",
+    "@AD_OUTPUT_STAGE/my_ad_a1b2c3d4_product_001.png",
+    "@AD_OUTPUT_STAGE/my_ad_a1b2c3d4_product_002.png"
   ],
   "num_products": 3, 
   "product_likely": true,
+  "output_stage": "@AD_OUTPUT_STAGE",
   "metadata": [
     {"crop_url": "...", "area_ratio": 0.234, "bbox": [120, 80, 400, 350], "confidence": 0.96},
     {"crop_url": "...", "area_ratio": 0.152, "bbox": [550, 100, 380, 320], "confidence": 0.94},

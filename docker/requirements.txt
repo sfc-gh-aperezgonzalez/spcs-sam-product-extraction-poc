@@ -8,3 +8,6 @@ opencv-python-headless==4.9.0.80
 Pillow==10.2.0
 numpy==1.26.3
 
+# Retry logic for robust I/O
+tenacity==8.2.3
+

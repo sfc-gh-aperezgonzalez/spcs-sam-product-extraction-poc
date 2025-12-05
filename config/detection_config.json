@@ -33,12 +33,6 @@
     "_nms_threshold_help": "Non-max suppression IoU threshold (0.0-1.0). Higher = more overlapping boxes kept.",
     
     "max_products_per_image": 10,
-    "_max_products_per_image_help": "Maximum products to return per image.",
-    
-    "batch_size": 4,
-    "_batch_size_help": "Images per batch for parallel I/O. Higher = better throughput but more memory.",
-    
-    "num_workers": 2,
-    "_num_workers_help": "Parallel threads for image loading. 2-4 is usually optimal."
+    "_max_products_per_image_help": "Maximum products to return per image."
 }
 

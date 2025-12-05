@@ -3,6 +3,10 @@ SAM 2 Detection Service - Clean HuggingFace API.
 
 This service detects products and returns bounding boxes.
 Cropping is handled separately by a Python UDF.
+
+Configuration can be loaded from a JSON file for tuning without Docker rebuilds:
+- Place detection_config.json in the input stage root
+- Service reads config at startup and on /reload_config calls
 """
 
 from fastapi import FastAPI, HTTPException, Request
@@ -18,23 +22,36 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Configuration file location (on mounted stage)
+CONFIG_PATH = os.getenv("CONFIG_PATH", "/input/detection_config.json")
+
 app = FastAPI(
     title="SAM 2 Product Detection Service",
-    description="Detect products using HuggingFace SAM 2 - returns bounding boxes",
-    version="1.0.0"
+    description="Detect products using HuggingFace SAM 2 - returns bounding boxes. "
+                "Configure via detection_config.json in input stage.",
+    version="1.1.0"
 )
 
 detector = None
 
 
-def get_detector():
+def get_detector(force_reload_config: bool = False):
+    """
+    Get or create the SAM2 detector instance.
+    
+    Args:
+        force_reload_config: If True, reload config from file
+    """
     global detector
     if detector is None:
         model_id = os.getenv("MODEL_ID", "facebook/sam2.1-hiera-small")
         logger.info(f"Loading SAM 2 model: {model_id}")
+        logger.info(f"Config path: {CONFIG_PATH}")
         
         from sam2_detector import SAM2Detector
-        detector = SAM2Detector(model_id=model_id)
+        detector = SAM2Detector(model_id=model_id, config_path=CONFIG_PATH)
+    elif force_reload_config:
+        detector.reload_config(CONFIG_PATH)
     
     return detector
 
@@ -42,12 +59,37 @@ def get_detector():
 @app.get("/health")
 async def health():
     import torch
+    det = get_detector()
     return {
         "status": "healthy",
         "model": "SAM 2.1 HuggingFace",
         "cuda": torch.cuda.is_available(),
-        "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None
+        "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
+        "config_path": CONFIG_PATH,
+        "current_config": det.config
     }
+
+
+@app.post("/reload_config")
+async def reload_config():
+    """
+    Reload detection configuration from the config file.
+    
+    Use this to apply new settings without restarting the service:
+    1. Upload new detection_config.json to input stage
+    2. Call this endpoint
+    3. New detections will use updated parameters
+    """
+    try:
+        det = get_detector(force_reload_config=True)
+        return {
+            "status": "config_reloaded",
+            "config_path": CONFIG_PATH,
+            "current_config": det.config
+        }
+    except Exception as e:
+        logger.error(f"Config reload failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/detect")
@@ -166,15 +208,22 @@ async def detect_folder(request: Request):
 
 @app.get("/")
 async def root():
+    det = get_detector()
     return {
         "service": "SAM 2 Product Detection",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "model": "HuggingFace SAM 2.1",
         "description": "Detects products and returns bounding boxes. Cropping done separately.",
+        "config": {
+            "path": CONFIG_PATH,
+            "current_values": det.config,
+            "how_to_tune": "Upload detection_config.json to input stage, then call /reload_config"
+        },
         "endpoints": {
-            "/health": "Health check",
+            "/health": "Health check with current config",
             "/detect": "POST - Detect single image",
-            "/detect_folder": "POST - Detect all images in folder"
+            "/detect_folder": "POST - Detect all images in folder",
+            "/reload_config": "POST - Reload config from file (no restart needed)"
         }
     }
 

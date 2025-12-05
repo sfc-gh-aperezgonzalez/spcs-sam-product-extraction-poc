@@ -79,4 +79,6 @@ test/output/
 .cursor/
 
 # HuggingFace model weights (downloaded separately)
-docker/hf_models/
+docker/hf_models/output_v2/
+output_v3/
+output_new/

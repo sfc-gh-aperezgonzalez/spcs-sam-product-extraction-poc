@@ -1,0 +1,12 @@
+{
+    "_preset": "Conservative - Fewer detections, higher precision",
+    "_description": "Use when false positives are a bigger problem than missing products",
+    
+    "pred_iou_thresh": 0.94,
+    "min_fill_ratio": 0.35,
+    "min_area_ratio": 0.03,
+    "max_area_ratio": 0.60,
+    "max_border_touches": 0,
+    "max_products_per_image": 5
+}
+

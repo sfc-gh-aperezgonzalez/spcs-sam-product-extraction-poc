@@ -1,55 +1,50 @@
-# ============================================================================
-# Dockerfile for SAM (Segment Anything Model) Inference Service
-# Base: NVIDIA CUDA 12.1 with cuDNN for GPU acceleration
-# ============================================================================
+# SAM 2 Detection Service - HuggingFace Implementation
+#
+# Build from project root:
+#   docker build -f docker/Dockerfile -t sam2-detector:latest .
+#
+FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
 
-FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04
-
-# Prevent interactive prompts during package installation
-ENV DEBIAN_FRONTEND=noninteractive
-
-# Install Python 3.10 and essential build tools
-RUN apt-get update && \
-    apt-get install -y \
-        python3.10 \
-        python3.10-venv \
-        python3-pip \
-        git \
-        wget \
-        libgl1-mesa-glx \
-        libglib2.0-0 \
+# Install Python
+RUN apt-get update && apt-get install -y \
+    python3.10 \
+    python3.10-dev \
+    python3-pip \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
-# Upgrade pip
-RUN python3 -m pip install --no-cache-dir --upgrade pip
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1
 
-# Install PyTorch with CUDA 12.1 support (AMD64 compatible versions)
-RUN pip install --no-cache-dir \
-    torch==2.1.0+cu121 \
-    torchvision==0.16.0+cu121 \
-    --index-url https://download.pytorch.org/whl/cu121
-
-# Install Segment Anything Model (SAM)
-RUN pip install --no-cache-dir git+https://github.com/facebookresearch/segment-anything.git
-
-# Install core dependencies
-COPY docker/requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt
-
-# Set working directory
 WORKDIR /app
 
-# Copy application code (from parent directory)
-# Note: Build from project root with: docker build -f docker/Dockerfile .
+# Install PyTorch 2.5+ (required for transformers SAM2 support)
+RUN pip3 install --no-cache-dir \
+    torch==2.5.1 \
+    torchvision==0.20.1 \
+    --index-url https://download.pytorch.org/whl/cu118
+
+# Install HuggingFace transformers with SAM2 support
+RUN pip3 install --no-cache-dir \
+    "transformers>=4.46.0" \
+    accelerate \
+    safetensors \
+    fastapi==0.104.1 \
+    uvicorn[standard]==0.24.0 \
+    Pillow \
+    numpy
+
+# Copy pre-downloaded HuggingFace model (for offline use)
+COPY docker/hf_models/sam2.1-hiera-small /app/hf_models/sam2.1-hiera-small
+
+# Copy application code
 COPY app/ /app/
 
-# Expose FastAPI port
+ENV PYTHONUNBUFFERED=1
+ENV MODEL_ID=/app/hf_models/sam2.1-hiera-small
+ENV TRANSFORMERS_OFFLINE=1
+ENV HF_HUB_OFFLINE=1
 ENV PORT=8080
+
 EXPOSE 8080
 
-# Health check endpoint
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD python3 -c "import requests; requests.get('http://localhost:8080/health')" || exit 1
-
-# Run FastAPI with uvicorn
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]
+CMD ["python3", "main.py"]

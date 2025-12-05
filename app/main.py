@@ -1,145 +1,180 @@
 """
-FastAPI application for SAM-based product extraction from ad images.
-Runs as an SPCS service with GPU acceleration.
+SAM 2 Detection Service - Clean HuggingFace API.
+
+This service detects products and returns bounding boxes.
+Cropping is handled separately by a Python UDF.
 """
 
 from fastapi import FastAPI, HTTPException, Request
 import os
 import json
 import logging
+import glob
+import time
 
-from inference import SAMInference
-
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# Initialize FastAPI app
 app = FastAPI(
-    title="SAM Product Extraction Service",
-    description="Extract individual products from ad images using Segment Anything Model",
+    title="SAM 2 Product Detection Service",
+    description="Detect products using HuggingFace SAM 2 - returns bounding boxes",
     version="1.0.0"
 )
 
-# Global inference engine (lazy-loaded)
-inference_engine = None
+detector = None
 
 
-def get_inference_engine() -> SAMInference:
-    """Lazy-load the SAM inference engine."""
-    global inference_engine
-    if inference_engine is None:
-        model_path = os.getenv("MODEL_PATH", "/models/sam_vit_h_4b8939.pth")
-        logger.info(f"Loading SAM model from {model_path}")
-        inference_engine = SAMInference(model_path=model_path)
-        logger.info("SAM model loaded successfully")
-    return inference_engine
+def get_detector():
+    global detector
+    if detector is None:
+        model_id = os.getenv("MODEL_ID", "facebook/sam2.1-hiera-small")
+        logger.info(f"Loading SAM 2 model: {model_id}")
+        
+        from sam2_detector import SAM2Detector
+        detector = SAM2Detector(model_id=model_id)
+    
+    return detector
 
 
 @app.get("/health")
-async def health_check():
-    """Health check endpoint."""
+async def health():
+    import torch
     return {
         "status": "healthy",
-        "model_loaded": inference_engine is not None
+        "model": "SAM 2.1 HuggingFace",
+        "cuda": torch.cuda.is_available(),
+        "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None
     }
 
 
-@app.post("/infer")
-async def run_inference(request: Request):
+@app.post("/detect")
+async def detect_single(request: Request):
     """
-    Extract products from an ad image.
-    Supports both direct calls and Snowflake service function batch format.
+    Detect products in a single image.
     
-    Args:
-        request: Either {input_url, output_stage} OR Snowflake batch {data: [[row, arg1, arg2]]}
-    
-    Returns:
-        JSON with crop URLs and metadata: {"crops": [...], "num_products": N, ...}
-    
-    Note:
-        Uses FLAT directory structure (no subdirectories) for improved performance.
-        Files: template_X_YY_runid_product_NNN.png (all at stage root level)
+    Request: {"data": [[row_num, "image_path"]]}
+    Returns: {"data": [[row_num, "{products: [...]}"]]}
     """
-    # Parse JSON body
     body = await request.json()
     
-    # Parse request - handle both formats
-    if "data" in body:
-        # Snowflake service function batch format: {"data": [[row_num, arg1, arg2, ...]]}
-        # For single-row: [[0, image_path, output_stage]]
-        data = body["data"]
-        if len(data) > 0 and len(data[0]) >= 3:
-            input_url = data[0][1]  # Second element (after row number)
-            output_stage = data[0][2]  # Third element (stage URL)
-            logger.info(f"Service function batch request: row={data[0][0]}")
-        else:
-            raise HTTPException(status_code=400, detail="Invalid batch data format")
+    if "data" not in body or not body["data"]:
+        raise HTTPException(status_code=400, detail="Invalid request")
+    
+    row_data = body["data"][0]
+    row_num = row_data[0]
+    image_path = row_data[1]
+    
+    # Convert stage path to local path
+    if image_path.startswith("@"):
+        parts = image_path.split("/", 1)
+        local_path = f"/input/{parts[1]}" if len(parts) == 2 else "/input/"
     else:
-        # Direct API call format
-        input_url = body.get("input_url")
-        output_stage = body.get("output_stage", os.getenv("AD_OUTPUT_STAGE_URL", "@AD_OUTPUT_STAGE"))
-    
-    # Ensure output_stage has proper format (with @ prefix)
-    if not output_stage.startswith("@"):
-        output_stage = f"@{output_stage}"
-    
-    logger.info(f"Inference request: input={input_url}, output_stage={output_stage}")
+        local_path = image_path
     
     try:
-        # Get inference engine
-        engine = get_inference_engine()
-        logger.info("Engine loaded successfully")
+        det = get_detector()
+        result = det.detect_products(local_path)
         
-        # Run inference and get crops
-        logger.info("Starting process_image...")
-        crop_urls = engine.process_image(
-            input_url=input_url,
-            output_stage=output_stage
-        )
-        logger.info(f"process_image completed")
+        # Return relative path for stage reference
+        result["image_path"] = image_path
         
-        logger.info(f"Generated {len(crop_urls)} product crops")
-        
-        # Get crop metadata for downstream filtering
-        crop_metadata = engine.get_crop_metadata()
-        
-        # Classify as product-likely or non-product based on heuristics
-        product_likely = len(crop_urls) > 0  # Simple: if any crops extracted, likely a product
-        
-        # Return Snowflake service function format for scalar function
-        # Format: {"data": [[row_number, return_value]]}
-        # Return a JSON string with crops + metadata for Cortex filtering
-        result_json = json.dumps({
-            "crops": crop_urls,
-            "num_products": len(crop_urls),
-            "product_likely": product_likely,
-            "input_image": input_url,
-            "output_stage": output_stage,
-            "metadata": crop_metadata  # For Cortex-based product filtering
-        })
-        
-        # Snowflake service function response format
-        response = {"data": [[0, result_json]]}
-        return response
+        return {"data": [[row_num, json.dumps(result)]]}
         
     except Exception as e:
-        logger.error(f"Inference failed: {str(e)}", exc_info=True)
+        logger.error(f"Detection failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/detect_folder")
+async def detect_folder(request: Request):
+    """
+    Detect products in all images in a folder.
+    
+    Request: {"data": [[row_num, "@INPUT_STAGE/folder"]]}
+    Returns: {"data": [[row_num, "[{image_path, products}, ...]"]]}
+    """
+    body = await request.json()
+    
+    if "data" not in body or not body["data"]:
+        raise HTTPException(status_code=400, detail="Invalid request")
+    
+    row_data = body["data"][0]
+    row_num = row_data[0]
+    input_folder = row_data[1]
+    
+    # Convert stage path to local path
+    if input_folder.startswith("@"):
+        parts = input_folder.split("/", 1)
+        local_folder = f"/input/{parts[1]}" if len(parts) == 2 else "/input/"
+    else:
+        local_folder = input_folder
+    
+    logger.info(f"Detecting products in folder: {local_folder}")
+    
+    try:
+        start_time = time.time()
+        det = get_detector()
+        
+        # Get all images
+        image_files = []
+        for ext in ['*.jpg', '*.jpeg', '*.png', '*.JPG', '*.JPEG', '*.PNG']:
+            image_files.extend(glob.glob(os.path.join(local_folder, ext)))
+        image_files.sort()
+        
+        logger.info(f"Found {len(image_files)} images")
+        
+        results = []
+        for i, local_path in enumerate(image_files, 1):
+            img_start = time.time()
+            
+            result = det.detect_products(local_path)
+            
+            # Convert local path back to stage path
+            relative = local_path.replace("/input/", "")
+            base_stage = input_folder.split('/')[0].replace('@', '')
+            result["image_path"] = f"@{base_stage}/{relative}"
+            
+            img_time = time.time() - img_start
+            logger.info(f"[{i}/{len(image_files)}] {os.path.basename(local_path)}: "
+                       f"{len(result['products'])} products in {img_time:.2f}s")
+            
+            results.append(result)
+        
+        elapsed = time.time() - start_time
+        total_products = sum(len(r["products"]) for r in results)
+        
+        summary = {
+            "total_images": len(results),
+            "total_products": total_products,
+            "elapsed_seconds": round(elapsed, 2),
+            "avg_seconds_per_image": round(elapsed / len(results), 2) if results else 0,
+            "throughput_per_hour": round(3600 / elapsed * len(results), 0) if elapsed > 0 else 0,
+            "detections": results
+        }
+        
+        logger.info(f"✓ Complete: {len(results)} images, {total_products} products in {elapsed:.2f}s")
+        
+        return {"data": [[row_num, json.dumps(summary)]]}
+        
+    except Exception as e:
+        logger.error(f"Detection failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/")
 async def root():
-    """Root endpoint with service info."""
     return {
-        "service": "SAM Product Extraction",
+        "service": "SAM 2 Product Detection",
         "version": "1.0.0",
+        "model": "HuggingFace SAM 2.1",
+        "description": "Detects products and returns bounding boxes. Cropping done separately.",
         "endpoints": {
-            "health": "/health",
-            "inference": "/infer (POST)"
+            "/health": "Health check",
+            "/detect": "POST - Detect single image",
+            "/detect_folder": "POST - Detect all images in folder"
         }
     }
 

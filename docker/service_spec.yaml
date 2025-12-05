@@ -1,0 +1,29 @@
+spec:
+  containers:
+  - name: sam2-detector
+    image: /shalion_hf_demo/product_extraction/ml_inference_repo/sam2-detector:latest
+    env:
+      MODEL_ID: /app/hf_models/sam2.1-hiera-small
+      TRANSFORMERS_OFFLINE: "1"
+      HF_HUB_OFFLINE: "1"
+    volumeMounts:
+    - name: input-stage
+      mountPath: /input
+    resources:
+      requests:
+        nvidia.com/gpu: 1
+        memory: 8Gi
+        cpu: "2"
+      limits:
+        nvidia.com/gpu: 1
+        memory: 16Gi
+        cpu: "4"
+  endpoints:
+  - name: detect
+    port: 8080
+    public: false
+  volumes:
+  - name: input-stage
+    source: stage
+    stageConfig:
+      name: "@SHALION_HF_DEMO.PRODUCT_EXTRACTION.AD_INPUT_STAGE"

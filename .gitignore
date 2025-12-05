@@ -73,10 +73,10 @@ local_test/
 
 # Output images
 output/
+test/output/
 
+# Cursor rules (project-specific)
 .cursor/
-specs/
-model_weights/
 
-TROUBLESHOOTING.md
-tests/
+# HuggingFace model weights (downloaded separately)
+docker/hf_models/

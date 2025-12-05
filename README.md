@@ -72,11 +72,11 @@ CALL SHALION_HF_DEMO.PRODUCT_EXTRACTION.EXTRACT_PRODUCTS(
 ```json
 {
   "total_images": 50,
-  "total_products": 104,
-  "detection_seconds": 68.51,
-  "cropping_seconds": 41.44,
-  "total_seconds": 109.95,
-  "throughput_per_hour": 1637
+  "total_products": 128,
+  "detection_seconds": 42.21,
+  "cropping_seconds": 42.65,
+  "total_seconds": 84.86,
+  "throughput_per_hour": 2121
 }
 ```
 
@@ -99,22 +99,22 @@ CALL SHALION_HF_DEMO.PRODUCT_EXTRACTION.EXTRACT_PRODUCTS(
 | Metric | Value |
 |--------|-------|
 | Images Processed | 50 |
-| Products Extracted | 104 |
-| Detection Time (GPU) | 68.5s |
-| Cropping Time (CPU) | 41.4s |
-| Total Time | 109.9s |
-| **Throughput** | **~1,600 images/hour** |
-| Avg Time per Image | ~2.2s |
+| Products Extracted | 128 |
+| Detection Time (GPU) | 42.2s |
+| Cropping Time (CPU) | 42.7s |
+| Total Time | 84.9s |
+| **Throughput** | **~2,100 images/hour** |
+| Avg Time per Image | ~1.7s |
 | GPU | NVIDIA A10G (24GB) |
 
 ### Estimated Processing Times
 
 | Volume | Single Node (1x GPU) | Multi-Node Potential* |
 |--------|---------------------|----------------------|
-| 1 image | ~2.2 seconds | - |
-| 50 images | ~2 minutes | - |
-| 1,000 images | ~37 minutes | ~4 min (10 nodes) |
-| 10,000 images | ~6 hours | ~36 min (10 nodes) |
+| 1 image | ~1.7 seconds | - |
+| 50 images | ~1.4 minutes | - |
+| 1,000 images | ~29 minutes | ~3 min (10 nodes) |
+| 10,000 images | ~4.8 hours | ~29 min (10 nodes) |
 
 *Multi-node estimates assume linear scaling with `MAX_NODES` in compute pool and `MAX_INSTANCES` in service configuration. Actual results depend on workload distribution and overhead.
 
@@ -195,14 +195,14 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed setup instructions.
 
 ### Estimated Processing Costs
 
-Based on PoC throughput of ~1,600 images/hour (single node). Warehouse time = total stored procedure execution time (GPU detection + CPU cropping).
+Based on PoC throughput of ~2,100 images/hour (single node). Warehouse time = total stored procedure execution time (GPU detection + CPU cropping).
 
 | Volume | Processing Time | GPU Cost | Warehouse Cost | **Total Est. $** | **Total Credits** |
 |--------|-----------------|----------|----------------|------------------|-------------------|
-| 1 image | ~2.2 sec | $0.000752 | $0.001320 | **$0.002072** | 0.000959 |
-| 50 images | ~2 min | ~$0.04 | ~$0.07 | **~$0.11** | ~0.052 |
-| 1,000 images | ~37 min | ~$0.76 | ~$1.33 | **~$2.09** | ~0.97 |
-| 10,000 images | ~6 hours | ~$7.38 | ~$12.96 | **~$20.34** | ~9.42 |
+| 1 image | ~1.7 sec | $0.00058 | $0.00102 | **$0.0016** | 0.00074 |
+| 50 images | ~1.4 min | ~$0.03 | ~$0.05 | **~$0.08** | ~0.037 |
+| 1,000 images | ~29 min | ~$0.59 | ~$1.04 | **~$1.63** | ~0.76 |
+| 10,000 images | ~4.8 hours | ~$5.90 | ~$10.37 | **~$16.27** | ~7.53 |
 
 ### Scaling Considerations
 

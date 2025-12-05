@@ -78,7 +78,7 @@ test/output/
 # Cursor rules (project-specific)
 .cursor/
 
-# HuggingFace model weights (downloaded separately)
-docker/hf_models/output_v2/
+# HuggingFace model weights (downloaded separately - 147MB+)
+docker/hf_models/
 output_v3/
 output_new/

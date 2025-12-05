@@ -19,34 +19,22 @@ from transformers import Sam2Model, Sam2Processor
 
 logger = logging.getLogger(__name__)
 
-# Default detection parameters - can be overridden via config file
+# Default detection parameters - tuned for retail ad product extraction
+# These match config/detection_config.json and are used as fallback
 DEFAULT_CONFIG = {
-    # Grid sampling
-    "points_per_side": 24,           # Grid density (24x24 = 576 points)
-    
-    # Quality thresholds
-    "pred_iou_thresh": 0.92,         # Minimum IoU score from SAM2
-    "min_fill_ratio": 0.25,          # Minimum mask/bbox fill ratio (filters text/logos)
-    
-    # Area filters (as ratio of image area)
-    "min_area_ratio": 0.02,          # Minimum 2% of image (was 1%)
-    "max_area_ratio": 0.70,          # Maximum 70% of image
-    
-    # Shape filters
-    "min_aspect_ratio": 0.15,        # Minimum width/height ratio (1:6.67)
-    "max_aspect_ratio": 6.0,         # Maximum width/height ratio (6:1)
-    
-    # Border touch filter
-    "border_margin_px": 10,          # Pixels from edge to consider "touching"
-    "max_border_touches": 1,         # Skip if touching more than N borders
-    
-    # NMS and limits
-    "nms_threshold": 0.5,            # Non-max suppression IoU threshold
-    "max_products_per_image": 10,    # Maximum products to return
-    
-    # Batch processing
-    "batch_size": 4,                 # Images per batch for parallel processing
-    "num_workers": 2                 # Parallel workers for image loading
+    "points_per_side": 24,
+    "pred_iou_thresh": 0.88,
+    "min_fill_ratio": 0.20,
+    "min_area_ratio": 0.015,
+    "max_area_ratio": 0.75,
+    "min_aspect_ratio": 0.20,
+    "max_aspect_ratio": 5.0,
+    "border_margin_px": 15,
+    "max_border_touches": 1,
+    "nms_threshold": 0.5,
+    "max_products_per_image": 10,
+    "batch_size": 4,
+    "num_workers": 2
 }
 
 
@@ -164,7 +152,7 @@ class SAM2Detector:
         input_labels = np.ones((1, input_points.shape[1], 1), dtype=np.int32)
         
         # Run inference with autocast for mixed precision
-        with torch.inference_mode(), torch.cuda.amp.autocast(dtype=torch.float16):
+        with torch.inference_mode(), torch.amp.autocast('cuda', dtype=torch.float16):
             inputs = self.processor(
                 image,
                 input_points=input_points,

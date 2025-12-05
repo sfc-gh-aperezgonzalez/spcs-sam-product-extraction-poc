@@ -1,44 +1,17 @@
 {
-    "_comment": "SAM2 Product Detection Configuration - Upload to input stage root to customize",
-    "_docs": "See README for parameter descriptions. Changes take effect after service restart.",
+    "_comment": "SAM2 Detection Config - Tuned for retail ad product extraction",
     
     "points_per_side": 24,
-    "_points_per_side_help": "Grid density for point sampling (24x24=576 points). Higher = more detections but slower.",
-    
     "pred_iou_thresh": 0.88,
-    "_pred_iou_thresh_help": "Minimum IoU confidence score from SAM2 (0.0-1.0). Lowered from 0.92 to catch more products.",
-    
     "min_fill_ratio": 0.20,
-    "_min_fill_ratio_help": "Minimum mask/bbox fill ratio. Lowered from 0.25 to catch products in white showcases.",
-    
     "min_area_ratio": 0.015,
-    "_min_area_ratio_help": "Minimum detection area as ratio of image. Lowered from 0.02 to catch smaller products.",
-    
     "max_area_ratio": 0.75,
-    "_max_area_ratio_help": "Maximum detection area as ratio of image. Increased to catch larger product showcases.",
-    
     "min_aspect_ratio": 0.20,
-    "_min_aspect_ratio_help": "Minimum width/height ratio. Slightly tightened from 0.15.",
-    
     "max_aspect_ratio": 5.0,
-    "_max_aspect_ratio_help": "Maximum width/height ratio. Slightly tightened from 6.0.",
-    
     "border_margin_px": 15,
-    "_border_margin_help": "Pixels from image edge to consider 'touching border'. Increased to filter edge decorations.",
-    
     "max_border_touches": 1,
-    "_max_border_touches_help": "Skip detections touching more than N borders (0-4). 1 = allow corner touches only.",
-    
     "nms_threshold": 0.5,
-    "_nms_threshold_help": "Non-max suppression IoU threshold (0.0-1.0). Higher = more overlapping boxes kept.",
-    
     "max_products_per_image": 10,
-    "_max_products_per_image_help": "Maximum products to return per image.",
-    
     "batch_size": 4,
-    "_batch_size_help": "Images per batch for parallel I/O. Higher = better throughput but more memory.",
-    
-    "num_workers": 2,
-    "_num_workers_help": "Parallel threads for image loading. 2-4 is usually optimal."
+    "num_workers": 2
 }
-

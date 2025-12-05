@@ -42,7 +42,11 @@ DEFAULT_CONFIG = {
     
     # NMS and limits
     "nms_threshold": 0.5,            # Non-max suppression IoU threshold
-    "max_products_per_image": 10     # Maximum products to return
+    "max_products_per_image": 10,    # Maximum products to return
+    
+    # Batch processing
+    "batch_size": 4,                 # Images per batch for parallel processing
+    "num_workers": 2                 # Parallel workers for image loading
 }
 
 
@@ -114,6 +118,8 @@ class SAM2Detector:
         logger.info(f"  min_fill_ratio: {self.config['min_fill_ratio']}")
         logger.info(f"  min_area_ratio: {self.config['min_area_ratio']}")
         logger.info(f"  max_area_ratio: {self.config['max_area_ratio']}")
+        logger.info(f"  batch_size: {self.config.get('batch_size', 4)}")
+        logger.info(f"  num_workers: {self.config.get('num_workers', 2)}")
     
     def reload_config(self, config_path: str):
         """Reload configuration from file (for runtime tuning)."""
@@ -313,3 +319,231 @@ class SAM2Detector:
                 "pred_iou_thresh": self.config['pred_iou_thresh']
             }
         }
+    
+    def _load_image(self, image_path: str) -> tuple:
+        """Load and preprocess a single image. Used by batch loader."""
+        try:
+            image = Image.open(image_path).convert("RGB")
+            width, height = image.size
+            return (image_path, image, width, height, None)
+        except Exception as e:
+            return (image_path, None, 0, 0, str(e))
+    
+    def _process_single_image_fast(self, image_data: tuple) -> Dict[str, Any]:
+        """
+        Process a single pre-loaded image. Optimized version that reuses point grid.
+        
+        Args:
+            image_data: (image_path, PIL.Image, width, height, error)
+        """
+        image_path, image, width, height, error = image_data
+        
+        if error:
+            logger.warning(f"Skipping {image_path}: {error}")
+            return self._empty_result(image_path, 0, 0)
+        
+        cfg = self.config
+        points_per_side = cfg['points_per_side']
+        
+        # Generate point grid for this image size
+        points_1d = np.linspace(0, 1, points_per_side)
+        xv, yv = np.meshgrid(points_1d, points_1d)
+        points = np.stack([xv.flatten() * width, yv.flatten() * height], axis=-1)
+        
+        input_points = points.reshape(1, -1, 1, 2)
+        input_labels = np.ones((1, input_points.shape[1], 1), dtype=np.int32)
+        
+        # Run inference
+        with torch.inference_mode(), torch.amp.autocast('cuda', dtype=torch.float16):
+            inputs = self.processor(
+                image,
+                input_points=input_points,
+                input_labels=input_labels,
+                return_tensors="pt"
+            ).to(self.device)
+            
+            outputs = self.model(**inputs)
+            
+            masks = self.processor.post_process_masks(
+                outputs.pred_masks,
+                inputs["original_sizes"]
+            )[0]
+            
+            iou_scores = outputs.iou_scores[0]
+        
+        # Close image immediately after processing
+        image.close()
+        
+        # Post-process on GPU
+        return self._post_process_masks(
+            masks, iou_scores, image_path, width, height, cfg
+        )
+    
+    def _post_process_masks(self, masks, iou_scores, image_path: str, 
+                            width: int, height: int, cfg: Dict) -> Dict[str, Any]:
+        """Post-process masks to extract products. Extracted for clarity."""
+        from torchvision.ops import masks_to_boxes, nms
+        
+        # Flatten multimask outputs
+        masks = masks.flatten(0, 1)
+        scores = iou_scores.flatten()
+        
+        # Filter by IoU threshold
+        keep = scores > cfg['pred_iou_thresh']
+        masks = masks[keep]
+        scores = scores[keep]
+        
+        if masks.shape[0] == 0:
+            return self._empty_result(image_path, width, height)
+        
+        boxes = masks_to_boxes(masks)
+        mask_areas = masks.sum(dim=(1, 2))
+        
+        bbox_widths = boxes[:, 2] - boxes[:, 0]
+        bbox_heights = boxes[:, 3] - boxes[:, 1]
+        bbox_areas = bbox_widths * bbox_heights
+        
+        fill_ratios = mask_areas.float() / (bbox_areas.float() + 1e-6)
+        
+        image_area = width * height
+        area_ratios = mask_areas.float() / image_area
+        keep_area = (area_ratios > cfg['min_area_ratio']) & (area_ratios < cfg['max_area_ratio'])
+        keep_fill = fill_ratios > cfg['min_fill_ratio']
+        keep_combined = keep_area & keep_fill
+        
+        boxes = boxes[keep_combined]
+        scores = scores[keep_combined]
+        mask_areas = mask_areas[keep_combined]
+        fill_ratios = fill_ratios[keep_combined]
+        
+        if boxes.shape[0] == 0:
+            return self._empty_result(image_path, width, height)
+        
+        keep_nms = nms(boxes.float(), scores.float(), cfg['nms_threshold'])
+        boxes = boxes[keep_nms]
+        scores = scores[keep_nms]
+        mask_areas = mask_areas[keep_nms]
+        fill_ratios = fill_ratios[keep_nms]
+        
+        # Convert to product list
+        products = []
+        max_products = cfg['max_products_per_image']
+        border_margin = cfg['border_margin_px']
+        max_touches = cfg['max_border_touches']
+        min_aspect = cfg['min_aspect_ratio']
+        max_aspect = cfg['max_aspect_ratio']
+        
+        for i in range(min(boxes.shape[0], max_products * 2)):
+            box = boxes[i].cpu().numpy()
+            x1, y1, x2, y2 = box
+            bbox = [int(x1), int(y1), int(x2 - x1), int(y2 - y1)]
+            
+            w, h = bbox[2], bbox[3]
+            if h == 0 or w == 0:
+                continue
+            aspect = w / h
+            if aspect < min_aspect or aspect > max_aspect:
+                continue
+            
+            touches = sum([
+                bbox[0] < border_margin,
+                bbox[1] < border_margin,
+                (bbox[0] + bbox[2]) > (width - border_margin),
+                (bbox[1] + bbox[3]) > (height - border_margin)
+            ])
+            if touches > max_touches:
+                continue
+            
+            products.append({
+                "bbox": bbox,
+                "confidence": round(float(scores[i].cpu()), 3),
+                "area": int(mask_areas[i].cpu()),
+                "fill_ratio": round(float(fill_ratios[i].cpu()), 3)
+            })
+            
+            if len(products) >= max_products:
+                break
+        
+        products.sort(key=lambda p: p["bbox"][2] * p["bbox"][3], reverse=True)
+        
+        # Clean up GPU tensors
+        del masks, boxes, scores, mask_areas, fill_ratios
+        
+        return {
+            "image_path": image_path,
+            "width": width,
+            "height": height,
+            "products": products,
+            "config_used": {
+                "min_area_ratio": cfg['min_area_ratio'],
+                "max_area_ratio": cfg['max_area_ratio'],
+                "min_fill_ratio": cfg['min_fill_ratio'],
+                "pred_iou_thresh": cfg['pred_iou_thresh']
+            }
+        }
+    
+    def detect_products_batch(self, image_paths: list) -> list:
+        """
+        Process multiple images with optimized batching.
+        
+        Uses a producer-consumer pattern:
+        - Producer: Loads images in parallel (I/O bound)
+        - Consumer: Runs inference sequentially on GPU (compute bound)
+        
+        This keeps the GPU continuously busy while I/O happens in parallel.
+        
+        Args:
+            image_paths: List of image file paths
+            
+        Returns:
+            List of detection results (same format as detect_products)
+        """
+        from concurrent.futures import ThreadPoolExecutor
+        from queue import Queue
+        import threading
+        
+        batch_size = self.config.get('batch_size', 4)
+        num_workers = self.config.get('num_workers', 2)
+        
+        results = [None] * len(image_paths)
+        image_queue = Queue(maxsize=batch_size * 2)
+        
+        # Producer: Load images in parallel threads
+        def image_loader():
+            with ThreadPoolExecutor(max_workers=num_workers) as executor:
+                futures = []
+                for idx, path in enumerate(image_paths):
+                    future = executor.submit(self._load_image, path)
+                    futures.append((idx, future))
+                
+                for idx, future in futures:
+                    image_data = future.result()
+                    image_queue.put((idx, image_data))
+            
+            # Signal end of images
+            image_queue.put(None)
+        
+        # Start loader thread
+        loader_thread = threading.Thread(target=image_loader, daemon=True)
+        loader_thread.start()
+        
+        # Consumer: Process images as they become available
+        processed = 0
+        while True:
+            item = image_queue.get()
+            if item is None:
+                break
+            
+            idx, image_data = item
+            result = self._process_single_image_fast(image_data)
+            results[idx] = result
+            processed += 1
+            
+            # Periodic GPU memory cleanup
+            if processed % batch_size == 0:
+                torch.cuda.empty_cache()
+        
+        loader_thread.join()
+        torch.cuda.empty_cache()
+        
+        return results

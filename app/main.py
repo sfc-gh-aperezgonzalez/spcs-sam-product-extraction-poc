@@ -133,7 +133,7 @@ async def detect_single(request: Request):
 @app.post("/detect_folder")
 async def detect_folder(request: Request):
     """
-    Detect products in all images in a folder.
+    Detect products in all images in a folder using batch processing.
     
     Request: {"data": [[row_num, "@INPUT_STAGE/folder"]]}
     Returns: {"data": [[row_num, "[{image_path, products}, ...]"]]}
@@ -167,26 +167,30 @@ async def detect_folder(request: Request):
         image_files.sort()
         
         logger.info(f"Found {len(image_files)} images")
+        batch_size = det.config.get('batch_size', 4)
+        logger.info(f"Processing with batch_size={batch_size}")
         
-        results = []
-        for i, local_path in enumerate(image_files, 1):
-            img_start = time.time()
-            
-            result = det.detect_products(local_path)
-            
-            # Convert local path back to stage path
+        # Use batch processing for better throughput
+        batch_start = time.time()
+        results = det.detect_products_batch(image_files)
+        batch_time = time.time() - batch_start
+        
+        # Convert local paths back to stage paths and log progress
+        base_stage = input_folder.split('/')[0].replace('@', '')
+        for i, result in enumerate(results):
+            local_path = result["image_path"]
             relative = local_path.replace("/input/", "")
-            base_stage = input_folder.split('/')[0].replace('@', '')
             result["image_path"] = f"@{base_stage}/{relative}"
             
-            img_time = time.time() - img_start
-            logger.info(f"[{i}/{len(image_files)}] {os.path.basename(local_path)}: "
-                       f"{len(result['products'])} products in {img_time:.2f}s")
-            
-            results.append(result)
+            # Log individual results
+            logger.info(f"[{i+1}/{len(image_files)}] {os.path.basename(local_path)}: "
+                       f"{len(result['products'])} products")
         
         elapsed = time.time() - start_time
         total_products = sum(len(r["products"]) for r in results)
+        
+        logger.info(f"Batch inference: {len(image_files)} images in {batch_time:.2f}s "
+                   f"({batch_time/len(image_files):.3f}s/image)")
         
         summary = {
             "total_images": len(results),
